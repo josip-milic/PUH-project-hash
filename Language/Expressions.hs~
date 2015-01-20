@@ -51,9 +51,6 @@ data Conditional = If { cond :: Predicate -- Predicate to satisfy
                          , cthen :: [TLExpr] -- Actions if satisfied
                          , celse :: [TLExpr] -- Actions otherwise
                          }
-                | While { cond :: Predicate -- Predicate to satisfy
-                         , cthen :: [TLExpr] -- Actions if satisfied
-                         }
                 deriving Show
 -- A top-level expression, wrapping either a conditional expression or a
 -- command

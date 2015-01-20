@@ -8,7 +8,7 @@ The task of this project is to implement **Hash**, a simple shell programmed in 
 ### Milestones
 - [ ] Basic language structures defined
 - [ ] Structure execution
-- [ ] Parsing
+- [ x ] Parsing
 - [ ] Basic Functionality (*80 %*)
     - [ ] Abstracted command calling (*2 pts*)
     - [ ] Conditional branching (*6 pts*)

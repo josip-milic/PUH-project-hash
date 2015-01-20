@@ -1,2 +1,413 @@
 -- Contains the parsers that take a string and produce an executable list of
 -- TLExpr constructs. We recommend Parsec for parsing.
+module Parsing.HashParser (topParser, customParse) where
+
+--import System.FilePath
+import System.Directory
+import System.Environment
+import System.IO (openFile,IOMode(..),hGetContents,hClose,withFile, stdout)
+import Language.Expressions
+import Language.Exec
+
+import System.FilePath.Posix
+
+
+import Text.Parsec.String (Parser)
+import Text.Parsec.Char (digit,char,spaces,string,oneOf,noneOf)
+import Text.Parsec (parse, ParseError)
+import Text.ParserCombinators.Parsec.Prim (unexpected)
+
+import Control.Applicative ((<$>), (<$), (<*>), (<*), (*>),(<|>),many, Applicative)
+import Data.List (intercalate) 
+import Data.Char (digitToInt)
+import Text.Parsec.Combinator (many1,between)
+import Control.Monad (void, join)
+
+import Text.Parsec.Combinator (sepBy1)
+import Text.Parsec.Char (letter)
+import Text.Parsec.Char (alphaNum)
+import Text.Parsec.Char (anyChar)
+import Text.Parsec.Expr
+import Text.Parsec (try)
+
+import qualified Data.List.Split as S
+
+import qualified Data.Map as M
+
+
+
+customParse :: String -> Either ParseError [TLExpr]
+customParse line = parse topParser "Parse error" line 
+
+whitespace :: Parser ()
+whitespace = void $ many $ oneOf " \n\t"
+
+strip :: String -> Parser ()
+strip str = void $ lexeme $ irrelevant  *> string str
+
+irrelevant :: Parser ()
+irrelevant = try commentParser <|> try whitespace <|> irrelevant
+
+lexeme :: Parser a -> Parser a
+lexeme p = p <* irrelevant
+
+symbol :: String -> Parser String
+symbol s = lexeme $ string s
+
+variable :: Parser String
+variable = do
+  l <- lexeme $ irrelevant  *> letter
+  rest <- many alphaNum
+  return $ l:rest  
+  
+
+--parens :: Parser String
+--parens = between (symbol "(") (symbol ")") simpleExpr
+
+condTrueParser :: Parser String
+condTrueParser = do
+  strip "True"
+  return "True"
+
+condFalseParser :: Parser String
+condFalseParser = do
+  strip "False"
+  return "False"
+  
+condParser :: Parser String
+condParser = try condTrueParser <|> condFalseParser
+
+topParser :: Parser [TLExpr]
+topParser = many $ try ifBlock <|> try whileBlock <|> commandParser  
+
+  
+calculation :: Parser Expr
+calculation  = buildExpressionParser table term
+
+--table :: [[Operator String () Data.Functor.Identity.Identity Expr]]
+table = [[prefix "-"]
+        ,[binary "^" AssocLeft]
+        ,[binary "*" AssocLeft
+         ,binary "/" AssocLeft
+         ,binary "%" AssocLeft]
+        ,[binary "+" AssocLeft
+         ,binary "-" AssocLeft]
+        --,[prefix "not"]
+        --,[binary "and" AssocLeft]
+        --,[binary "or" AssocLeft]
+        ]
+  where
+    binary name assoc =
+        Infix (mkBinOp name <$ symbol name) assoc
+    mkBinOp nm a b = Binary a nm b
+    prefix name = Prefix (Pref name <$ symbol name)
+
+term :: Parser Expr
+term = expressionVar  <|> expressionNum <|> parens
+--expressionTrue <|> expressionFalse  
+
+parens :: Parser Expr
+parens = between (symbol "(") (symbol ")") calculation
+
+
+evalCalc :: Expr -> Expr
+evalCalc e = case e of
+  Num _     -> e
+  Var _     -> unwrap $ evalExpression e
+  Pref "-" exp -> oppr $ evalCalc exp
+  Binary exp1 "+" exp2 -> op (+) (evalCalc exp1) (evalCalc exp2)
+  Binary exp1 "-" exp2 -> op (-) (evalCalc exp1) (evalCalc exp2)
+  Binary exp1 "*" exp2 -> op (*) (evalCalc exp1) (evalCalc exp2)
+  Binary exp1 "/" exp2 -> op (div) (evalCalc exp1) (evalCalc exp2)
+  Binary exp1 "^" exp2 -> op (^) (evalCalc exp1) (evalCalc exp2)
+  Binary exp1 "%" exp2 -> op (mod) (evalCalc exp1) (evalCalc exp2)
+  where unwrap (Just exp) = exp
+        unwrap Nothing    = error "Variable not found"
+        oppr   (Num n)    = Num (-n)
+        op     f  (Num n1) (Num n2) = Num $ f n1 n2
+
+  
+ifThen :: Parser TLExpr
+ifThen = do
+  strip "if"
+  pred <- predicate
+  strip "then"
+  strip "("
+  parsed <- topParser
+  strip ")" 
+  return $ TLCnd $ If pred parsed
+
+
+ifThenElse :: Parser TLExpr
+ifThenElse = do
+  strip "if"
+  pred <- predicate
+  strip "then"
+  strip "("
+  parsed1 <- topParser
+  strip ")"
+  strip "else"
+  strip "("
+  parsed2 <- topParser
+  strip ")"
+  return $ TLCnd $ IfElse pred parsed1 parsed2
+
+ifBlock :: Parser TLExpr
+ifBlock = try ifThenElse <|> ifThen
+
+whileBlock :: Parser TLExpr
+whileBlock = do
+  strip "while"
+  pred <- predicate
+  strip "("
+  parsed <- topParser
+  strip ")"
+  return $ TLCnd $ While pred parsed
+
+
+{-
+expressionTrue :: Parser Expr
+expressionTrue = do
+  strip "True"
+  return $ Boolean $ True
+
+expressionFalse :: Parser Expr
+expressionFalse = do
+  strip "False"
+  return $ Boolean $ False
+-}
+
+expressionVar :: Parser Expr
+expressionVar = do
+  strip "$"
+  l <- lexeme $ irrelevant  *>  many1 letter
+  rest <- many alphaNum
+  return $ Var $ l++rest  
+
+
+expressionNum :: Parser Expr
+expressionNum = do
+  d <- lexeme $ irrelevant  *>  many1 digit
+  return $ Num $ read d  
+
+expression :: Parser Expr
+expression = try expressionVar   <|> 
+             try expressionNum  
+           --try expressionTrue  <|> 
+           --expressionFalse     
+
+
+comparisonEQ :: Parser Comp
+comparisonEQ = do
+  expr1 <- calculation
+  strip "=="
+  expr2 <- calculation
+  return $ CEQ expr1 expr2
+
+comparisonNE :: Parser Comp
+comparisonNE = do
+  expr1 <- calculation
+  strip "/="
+  expr2 <- calculation
+  return $ CNE expr1 expr2
+
+comparisonGE :: Parser Comp
+comparisonGE = do
+  expr1 <- calculation
+  strip ">="
+  expr2 <- calculation
+  return $ CGE expr1 expr2
+
+comparisonGT :: Parser Comp
+comparisonGT = do
+  expr1 <- calculation
+  strip ">"
+  expr2 <- calculation
+  return $ CGT expr1 expr2
+
+comparisonLE :: Parser Comp
+comparisonLE = do
+  expr1 <- calculation
+  strip "<="
+  expr2 <- calculation
+  return $ CLE expr1 expr2
+
+comparisonLT :: Parser Comp
+comparisonLT = do
+  expr1 <- calculation
+  strip "<"
+  expr2 <- calculation
+  return $ CLT expr1 expr2
+
+{-
+comparisonLI :: Parser Comp
+comparisonLI = do
+  expr <- calculation
+  return $ CLI expr
+-}
+
+
+--varTable = M.insert "a" "b" M.empty
+--M.lookup "k" varTable
+--varTable = M.empty
+
+varTable :: M.Map String Expr
+varTable =  M.insert "a" (Num 2) M.empty
+
+
+comparison :: Parser Comp
+comparison = try comparisonEQ <|> 
+             try comparisonNE <|> 
+             try comparisonGE <|> 
+             try comparisonLE <|> 
+             try comparisonGT <|> 
+             try comparisonLT 
+             --comparisonLI
+
+
+evalExpression :: Expr -> Maybe Expr
+evalExpression p = case p of
+  Num n     -> Just $ Num n
+  --Boolean b -> Just $ Boolean b
+  Var v     -> M.lookup v varTable
+
+
+
+evalComparison :: Comp -> Bool
+evalComparison p = case p of
+  CEQ e1 e2 -> eval (==) (evalCalc e1) (evalCalc e2)
+  CNE e1 e2 -> eval (/=) (evalCalc e1) (evalCalc e2)
+  CGE e1 e2 -> eval (>=) (evalCalc e1) (evalCalc e2)
+  CGT e1 e2 -> eval (>)  (evalCalc e1) (evalCalc e2)
+  CLE e1 e2 -> eval (<=) (evalCalc e1) (evalCalc e2)
+  CLT e1 e2 -> eval (<)  (evalCalc e1) (evalCalc e2)
+  --CLI e     -> eval' (evalExpression e)
+  where
+-- eval  _   (Just (Boolean _ ))  _                  = Nothing 
+--        eval  _   _                    (Just (Boolean _)) = Nothing
+--        eval  _   _                    Nothing            = Nothing
+--        eval  _   Nothing              _                  = Nothing
+        eval  f   (Num n1)      (Num n2)    =  f n1 n2
+ --       eval  f   _             _           = Nothing 
+
+        --eval' (Just (Boolean b)) = Just b
+        --eval' _                  = Nothing
+
+
+
+predicateComp = do
+  c <- comparison
+  return $ Predicate c 
+
+
+predicate :: Parser Predicate
+predicate  = buildExpressionParser table2 term2
+
+--table :: [[Operator String () Data.Functor.Identity.Identity Expr]]
+table2 = [[prefix "not"]
+         , [binary "and" AssocLeft]
+         , [binary "or" AssocLeft]
+        ]
+  where
+    binary name assoc =
+        Infix (mkBinOp name <$ symbol name) assoc
+    mkBinOp nm a b = BinPr a nm b
+    prefix name = Prefix (Prfx name <$ symbol name)
+
+term2 :: Parser Predicate
+term2 = predicateComp <|> parents
+--expressionTrue <|> expressionFalse  
+
+parents :: Parser Predicate
+parents = between (symbol "(") (symbol ")") predicate
+
+evalPredicate :: Predicate -> Bool
+evalPredicate p = case p of
+  Prfx "not" pred     -> not $ evalPredicate pred
+  BinPr pr1 "and" pr2 -> and [evalPredicate pr1, evalPredicate pr2]
+  BinPr pr1 "or" pr2  -> or  [evalPredicate pr1, evalPredicate pr2]
+  Predicate   c                 -> evalComparison c
+  
+quotedParser :: Parser String
+quotedParser = do
+  strip "\""
+  str <- many $ noneOf "\""
+  strip "\""
+  return str
+
+redirectOutParser :: Cmd -> Parser Cmd
+redirectOutParser (Cmd nm ar _ _ _) = do
+  strip ">"
+  fp <- quotedParser
+  return $ Cmd nm ar Nothing (Just (Str fp)) False
+
+redirectAppParser :: Cmd -> Parser Cmd
+redirectAppParser (Cmd nm ar _ _ _) = do
+  strip ">>"
+  fp <- quotedParser
+  return $ Cmd nm ar Nothing (Just (Str fp)) True
+
+redirectInParser :: Cmd -> Parser Cmd
+redirectInParser (Cmd nm ar _ _ _) = do
+  strip "<"
+  fp <- quotedParser
+  return $ Cmd nm ar (Just (Str fp)) Nothing False
+
+redirectParser :: Cmd -> Parser Cmd
+redirectParser cmd = try (redirectAppParser cmd) <|> try (redirectOutParser cmd) <|> redirectInParser cmd
+
+ret :: Cmd -> Parser TLExpr
+ret cmd = do
+  rdr <- many $ redirectParser cmd
+  case (null rdr) of
+    True  -> return $ TLCmd cmd
+    False -> return $ TLCmd $ head rdr  
+
+
+commentParser :: Parser ()
+commentParser = do
+  void $ lexeme $ whitespace *> string "#"
+  w <- many $ noneOf "\n"
+  _ <- many $ oneOf "\n\r"
+  void $ irrelevant
+
+flagParser :: Parser String
+flagParser = do
+  strip "-"
+  str <- many $ noneOf " )\n"
+  return ('-':str)  
+
+commandParser :: Parser TLExpr
+commandParser = try assignCommParser <|> commParser
+
+assignCommParser :: Parser TLExpr
+assignCommParser = do
+  v <- variable
+  strip "="
+  e <- calculation
+  return $ TLCmd $ Assign (Var v) e
+
+commParser :: Parser TLExpr
+commParser = do
+  l <- lexeme $ irrelevant  *> letter
+  rest  <- many $ alphaNum
+  expr  <- try $ lexeme $ irrelevant  *> many calculation 
+  args  <- many quotedParser
+  flags <- many flagParser
+  let exprs = case (null expr) of
+                True  -> fmap Str (args++flags)
+                False -> head expr : []
+  let cmd = Cmd (l:rest) exprs Nothing Nothing False
+  ret cmd  
+
+putFileScreen :: FilePath -> IO String
+putFileScreen fname = do
+  exist <- doesFileExist fname
+  if exist then do
+    c <- readFile fname
+    return c
+           else do
+   return $ "File '"++fname++"' not found."
+
+
+

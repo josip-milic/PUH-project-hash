@@ -75,7 +75,8 @@ evaluate prompt (tle:ts) script@(ScriptState last currdir vart) =
                     Just (Str f) -> case app of
                                      False -> writeFile f $ output ss 
                                      True  -> appendFile f $ "\n" ++ output ss
-                  evaluate prompt ts $ ScriptState "" (wd ss) (vartable ss)
+                  let prmpt = if (nm == "cd") then (wd ss) else prompt
+                  evaluate prmpt ts $ ScriptState "" (wd ss) (vartable ss)
         False -> do
                    let varch = evalCalc (Var nm) vart
                    case outd of

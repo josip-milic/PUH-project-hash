@@ -1,12 +1,21 @@
 module Language.Exec where
 
+import Language.Expressions
+import Parsing.HashParser
+
+import System.Directory (getDirectoryContents, doesDirectoryExist, doesFileExist, canonicalizePath, getHomeDirectory, setCurrentDirectory, getCurrentDirectory)
+import System.FilePath.Posix
+
+
 import qualified Data.Map as M
+import qualified Data.List.Split as S
+import Data.List (intercalate)
 
 -- A model of a command which is waiting for arguments and a state to run
-type Command = [String] -> ScriptState -> IO ScriptState
+type Command = [Expr] -> ScriptState -> IO ScriptState
 
 -- A table of variables, in fact a map of (Name, Value) pairs.
-type VarTable = M.Map String String
+type VarTable = M.Map String Expr
 
 -- A command table - abstracted command execution, (contains command name,
 -- command) pairs. Simplest, but hardly the best way to implement this.
@@ -15,10 +24,10 @@ type CommandTable = M.Map String Command
 -- A script state containing the last output, current working directory and
 -- the current table of variables.
 data ScriptState = ScriptState { output   :: String
-                               , wd       :: IO FilePath
+                               , wd       :: FilePath
                                , vartable :: VarTable
                                } 
-                               --deriving Show
+                               deriving Show
 
 -- Runs a set of commands for a given command table. If this is the first
 -- command in the chain, it is given a FilePath and constructs a new, initially
@@ -35,3 +44,11 @@ data ScriptState = ScriptState { output   :: String
 -- are passed around as necessary to evaluate commands, assignments and
 -- variable substitution. A better way to pass around variables would be to
 -- use the State monad or even the StateT monad transformer to wrap IO into it.
+
+
+
+-- evals:
+
+
+
+

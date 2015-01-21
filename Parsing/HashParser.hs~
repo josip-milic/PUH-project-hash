@@ -7,6 +7,7 @@ import System.Directory
 import System.Environment
 import System.IO (openFile,IOMode(..),hGetContents,hClose,withFile, stdout)
 import Language.Expressions
+import Language.Exec
 
 import System.FilePath.Posix
 

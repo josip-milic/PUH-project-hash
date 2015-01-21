@@ -6,7 +6,6 @@ import Language.Evals
 
 import Data.List (intercalate)
 
-import qualified Data.Map as M
 import qualified Data.List.Split as S
 import Data.List (intercalate)
 import System.Directory (getDirectoryContents, doesDirectoryExist, doesFileExist, canonicalizePath, getHomeDirectory, setCurrentDirectory, getCurrentDirectory)

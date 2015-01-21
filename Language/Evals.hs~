@@ -1,0 +1,56 @@
+module Language.Evals where
+
+import Language.Expressions
+import Language.Exec
+
+evalPredicate :: Predicate -> VarTable -> Bool
+evalPredicate p vart = case p of
+  Prfx "not" pred     -> not $ evalPredicate pred vart
+  BinPr pr1 "and" pr2 -> and [evalPredicate pr1 vart, evalPredicate pr2 vart]
+  BinPr pr1 "or" pr2  -> or  [evalPredicate pr1 vart, evalPredicate pr2 vart]
+  Predicate   c       -> evalComparison c vart
+
+evalCalc :: Expr -> VarTable -> Expr
+evalCalc e vart = case e of
+  Num _                -> e
+  Var _                -> unwrap $ evalExpression e vart
+  Pref "-" exp         -> oppr $ evalCalc exp vart
+  Binary exp1 "+" exp2 -> op (+) (evalCalc exp1 vart) (evalCalc exp2 vart)
+  Binary exp1 "-" exp2 -> op (-) (evalCalc exp1 vart) (evalCalc exp2 vart)
+  Binary exp1 "*" exp2 -> op (*) (evalCalc exp1 vart) (evalCalc exp2 vart)
+  Binary exp1 "/" exp2 -> op (div) (evalCalc exp1 vart) (evalCalc exp2 vart)
+  Binary exp1 "^" exp2 -> op (^) (evalCalc exp1 vart) (evalCalc exp2 vart)
+  Binary exp1 "%" exp2 -> op (mod) (evalCalc exp1 vart) (evalCalc exp2 vart)
+  where unwrap (Just exp) = exp
+        unwrap Nothing    = error "Variable not found"
+        oppr   (Num n)    = Num (-n)
+        op     f  (Num n1) (Num n2) = Num $ f n1 n2
+
+evalComparison :: Comp -> VarTable -> Bool
+evalComparison p vart = case p of
+  CEQ e1 e2 -> eval (==) (evalCalc e1 vart) (evalCalc e2 vart)
+  CNE e1 e2 -> eval (/=) (evalCalc e1 vart) (evalCalc e2 vart)
+  CGE e1 e2 -> eval (>=) (evalCalc e1 vart) (evalCalc e2 vart)
+  CGT e1 e2 -> eval (>)  (evalCalc e1 vart) (evalCalc e2 vart)
+  CLE e1 e2 -> eval (<=) (evalCalc e1 vart) (evalCalc e2 vart)
+  CLT e1 e2 -> eval (<)  (evalCalc e1 vart) (evalCalc e2 vart)
+  --CLI e     -> eval' (evalExpression e)
+  where
+-- eval  _   (Just (Boolean _ ))  _                  = Nothing 
+--        eval  _   _                    (Just (Boolean _)) = Nothing
+--        eval  _   _                    Nothing            = Nothing
+--        eval  _   Nothing              _                  = Nothing
+        eval  f   (Num n1)      (Num n2)    =  f n1 n2
+ --       eval  f   _             _           = Nothing 
+
+        --eval' (Just (Boolean b)) = Just b
+        --eval' _                  = Nothing
+        --
+ 
+
+
+evalExpression :: Expr -> VarTable -> Maybe Expr
+evalExpression p vart = case p of
+  Num n     -> Just $ Num n
+  Var v     -> M.lookup v vart
+

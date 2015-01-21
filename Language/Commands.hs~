@@ -234,7 +234,7 @@ rmdirCommand ((Str arg):as) scr@(ScriptState out wd vart) = do
               case (isValid arg) of
                 True -> do 
                           gc <-  getDirectoryContents arg
-                          case (length gc <= 2) of
+                          case (length gc > 2) of
                             True  -> do
                                        removeDirectory arg
                                        case (length as > 0) of

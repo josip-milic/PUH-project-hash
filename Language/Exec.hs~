@@ -1,0 +1,96 @@
+module Language.Exec where
+
+import Language.Expressions
+import Parsing.HashParser
+import Language.Evals
+
+import System.Directory (getDirectoryContents, doesDirectoryExist, doesFileExist, canonicalizePath, getHomeDirectory, setCurrentDirectory, getCurrentDirectory)
+import System.FilePath.Posix
+
+
+import qualified Data.Map as M
+import qualified Data.List.Split as S
+import Data.List (intercalate)
+
+-- A model of a command which is waiting for arguments and a state to run
+type Command = [Expr] -> ScriptState -> IO ScriptState
+
+-- A table of variables, in fact a map of (Name, Value) pairs.
+type VarTable = M.Map String Expr
+
+-- A command table - abstracted command execution, (contains command name,
+-- command) pairs. Simplest, but hardly the best way to implement this.
+type CommandTable = M.Map String Command
+
+-- A script state containing the last output, current working directory and
+-- the current table of variables.
+data ScriptState = ScriptState { output   :: String
+                               , wd       :: FilePath
+                               , vartable :: VarTable
+                               } 
+                               deriving Show
+
+-- Runs a set of commands for a given command table. If this is the first
+-- command in the chain, it is given a FilePath and constructs a new, initially
+-- blank, ScriptState. Otherwise, it is given the state as left by the previous
+-- command's execution.
+--runHashProgram :: CommandTable -> Either FilePath ScriptState -> [TLExpr] -> IO ScriptState
+
+-- Calculates the result of a top-level command execution
+--runTopLevel :: CommandTable -> ScriptState -> TLExpr -> IO ScriptState
+
+-- The rest of the module should consist of similar functions, calling each
+-- other so that each expression is parsed by a lower-level function and the
+-- result can be used in a higher-level function. The Command table and state
+-- are passed around as necessary to evaluate commands, assignments and
+-- variable substitution. A better way to pass around variables would be to
+-- use the State monad or even the StateT monad transformer to wrap IO into it.
+
+
+evaluate :: String -> [TLExpr] -> ScriptState -> IO (String,ScriptState)
+evaluate prompt [] script = return (prompt,script)
+evaluate prompt (tle:ts) script@(ScriptState last currdir vart) =
+  case tle of
+    TLCmd (Cmd "prompt" [Str p] _ _ _ ) -> do
+      evaluate p ts script
+    TLCmd (Cmd nm ar ind outd app) -> do
+      case (M.member nm commands) of
+        True -> do
+                  let comm = unwrap $ M.lookup nm commands
+                                                                   
+                  ss <- comm ar script
+                  case outd of
+                    Nothing      -> putStrLn $ output ss  
+                    Just (Str f) -> case app of
+                                     False -> writeFile f $ output ss 
+                                     True  -> appendFile f $ "\n" ++ output ss
+                  evaluate prompt ts $ ScriptState "" (wd ss) (vartable ss)
+        False -> do
+                   let varch = evalCalc (Var nm) vart
+                   case outd of
+                     Nothing      -> putStrLn $ numton varch 
+                     Just (Str f) -> case app of
+                                     False -> writeFile f $ numton varch
+                                     True  -> appendFile f $ "\n" ++ numton varch
+                   evaluate prompt ts $ ScriptState (numton varch) currdir vart
+                   
+                   
+    TLCmd (Assign (Var var) val)         -> do
+      evaluate prompt ts $ ScriptState last currdir $ M.insert var (evalCalc val vart) vart
+    TLCnd (If cnd cth) -> case (evalPredicate cnd vart) of
+                            True -> evaluate prompt cth script
+                            False -> evaluate prompt ts  script
+    TLCnd (IfElse cnd cth cel) -> case (evalPredicate cnd vart) of
+                            True -> evaluate prompt cth script
+                            False -> evaluate prompt cel  script
+    TLCnd wh@(While cnd cth) -> case (evalPredicate cnd vart) of
+                            True  -> evaluate prompt (cth++(tle:ts)) script
+                                       
+                            False -> evaluate prompt ts  script
+  where unwrap name@(Just g)  = g 
+        unwrap name@(Nothing) = error "Command not found."
+        numton (Num n)        = show n
+        numton _              = "Command not found"
+
+
+

@@ -26,13 +26,16 @@ newVarTable = M.empty
 runScript :: FilePath -> IO ()
 runScript filePath = do
   cd <- getCurrentDirectory
-  let scriptState = ScriptState "" cd newVarTable
+  let script = ScriptState "" cd newVarTable
   file <- readFile $ "Scripts\\" ++ filePath
-  let a =  customParse file
+  let parsed =  customParse file
   void $ putStrLn $ "Here is the result of Hash script '"++ (takeFileName filePath) ++"':"
-  case a of
+  case parsed of
     Left  e  -> putStrLn $ show $ e
-    Right s  -> putStrLn $ show s
+    Right s  -> do 
+                  (pr,ss) <- evaluate cd s script
+                  return ()
+                  runInteractive
 -- Communicates with the user and performs hash commands line by line
 runInteractive :: IO ()
 runInteractive = do
